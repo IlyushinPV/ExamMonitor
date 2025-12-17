@@ -4,3 +4,4 @@ mss
 requests
 pillow
 pyinstaller
+psutil
