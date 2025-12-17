@@ -1,0 +1,6 @@
+customtkinter
+packaging
+mss
+requests
+pillow
+pyinstaller
