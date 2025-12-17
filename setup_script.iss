@@ -5,11 +5,15 @@
 #define MyAppExeName "agent.exe"
 
 [Setup]
+; Уникальный ID приложения. Если уже ставили старую версию — удалите её сначала.
 AppId={{A3590506-692B-4417-8857-79F019F02302}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+
+; Установка в Program Files (x86)
 DefaultDirName={autopf}\{#MyAppName}
+
 DisableDirPage=yes
 DefaultGroupName={#MyAppName}
 OutputDir=.
@@ -26,9 +30,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startup"; Description: "Запускать автоматически при входе в Windows"; GroupDescription: "Автозапуск:"; Flags: checkablealone
 
 [Files]
-; GitHub Actions создаст agent.exe в папке dist
+; ВАЖНО: GitHub Actions собирает exe в папку dist.
 Source: "dist\agent.exe"; DestDir: "{app}"; Flags: ignoreversion
-; Если есть иконка и логотип в репозитории - раскомментируйте:
+
+; Если вы хотите, чтобы файлы иконок лежали рядом с программой (опционально, т.к. мы их вшили внутрь):
 ; Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Source: "logo.png"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -37,7 +42,9 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startup
+; КЛЮЧЕВОЙ МОМЕНТ: Добавляем флаг --silent для скрытого автозапуска
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"" --silent"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Запустить программу"; Flags: nowait postinstall skipifsilent
+; При завершении установки запускаем программу (БЕЗ флага silent, чтобы админ мог настроить)
+Filename: "{app}\{#MyAppExeName}"; Description: "Запустить программу и настроить"; Flags: nowait postinstall skipifsilent
