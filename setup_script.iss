@@ -2,7 +2,7 @@
 #define MyAppName "Exam Monitor Agent"
 #define MyAppVersion "2.0"
 #define MyAppPublisher "School Admin"
-#define MyAppExeName "agent.exe"
+#define MyAppExeName "ExamMonAgent.exe"
 
 [Setup]
 ; Уникальный ID приложения. Если уже ставили старую версию — удалите её сначала.
@@ -31,7 +31,7 @@ Name: "startup"; Description: "Запускать автоматически п�
 
 [Files]
 ; ВАЖНО: GitHub Actions собирает exe в папку dist.
-Source: "dist\agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\ExamMonAgent.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Если вы хотите, чтобы файлы иконок лежали рядом с программой (опционально, т.к. мы их вшили внутрь):
 ; Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
