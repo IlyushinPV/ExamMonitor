@@ -31,7 +31,7 @@ jobs:
     # --icon "icon.ico" ставит иконку самому файлу приложения
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --name "agent" --add-data "icon.ico;." --add-data "logo.png;." --icon "icon.ico" agent.py
+        pyinstaller --onefile --noconsole --name "ExamMonAgent" --add-data "icon.ico;." --add-data "logo.png;." --icon "icon.ico" agent.py
 
     # 5. Собираем Установщик (Setup.exe) через Inno Setup
     # Используем готовый Action
