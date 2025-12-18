@@ -15,7 +15,7 @@ import ftplib
 import io
 from PIL import Image
 import psutil
-from smb.SMBConnection import SMBConnection # НОВАЯ БИБЛИОТЕКА
+from smb.SMBConnection import SMBConnection
 
 # --- Настройка DPI ---
 try:
@@ -61,7 +61,7 @@ def log_message(message):
 def load_settings():
     default_settings = {
         "mode": "HTTP",
-        "url_host": "http://192.168.1.100:5000/upload",
+        "url_host": "",
         "ftp_user": "",
         "ftp_pass": "",
         "interval": 10,
@@ -102,12 +102,10 @@ def take_screenshot_and_send(settings):
             sct_img = sct.grab(sct.monitors[1])
             img_bytes = mss.tools.to_png(sct_img.rgb, sct_img.size)
 
-            # --- HTTP ---
             if settings["mode"] == "HTTP":
                 files = {'file': (filename, img_bytes)}
                 requests.post(settings["url_host"], files=files, timeout=10)
 
-            # --- FTP ---
             elif settings["mode"] == "FTP":
                 bio = io.BytesIO(img_bytes)
                 with ftplib.FTP(settings["url_host"]) as ftp:
@@ -115,28 +113,21 @@ def take_screenshot_and_send(settings):
                     ftp.set_pasv(True)
                     ftp.storbinary(f"STOR {filename}", bio)
 
-            # --- SMB (Windows Share) ---
             elif settings["mode"] == "SMB":
-                # Парсим строку: 192.168.1.5/FolderName
-                # Или просто 192.168.1.5 (тогда папку считаем "public" или как-то еще?)
-                # Договоримся: IP/ShareName
-                raw_url = settings["url_host"].replace("\\", "/") # Нормализуем слеши
+                raw_url = settings["url_host"].replace("\\", "/")
                 parts = raw_url.split("/", 1)
-                
                 server_ip = parts[0]
                 share_name = parts[1] if len(parts) > 1 else "public" 
                 
-                # Парсим юзера: DOMAIN\User или просто User
                 user_full = settings["ftp_user"]
                 if "\\" in user_full:
                     domain, username = user_full.split("\\", 1)
                 else:
-                    domain = pc_name # Если домен не указан, используем имя ПК или workgroup
+                    domain = pc_name
                     username = user_full
 
                 password = settings["ftp_pass"]
                 
-                # Подключаемся
                 conn = SMBConnection(username, password, pc_name, server_ip, domain=domain, use_ntlm_v2=True)
                 connected = conn.connect(server_ip, 445)
                 
@@ -206,10 +197,9 @@ class App(ctk.CTk):
         self.lbl_title = ctk.CTkLabel(self, text="Настройка Агента", font=("Segoe UI", 24, "bold"))
         self.lbl_title.pack(pady=(15, 5))
 
-        # --- Поля ---
+        # Поля
         ctk.CTkLabel(self, text="Режим отправки:", font=("Segoe UI", 12)).pack(pady=(2, 0))
         self.mode_var = ctk.StringVar(value=self.settings.get("mode", "HTTP"))
-        # ДОБАВИЛИ SMB
         self.combo_mode = ctk.CTkComboBox(self, values=["HTTP", "FTP", "SMB"], variable=self.mode_var, width=300)
         self.combo_mode.pack(pady=2)
 
@@ -233,7 +223,7 @@ class App(ctk.CTk):
         self.entry_interval.insert(0, str(self.settings.get("interval", "10")))
         self.entry_interval.pack(pady=2)
 
-        # --- Время ---
+        # Время
         ctk.CTkLabel(self, text="Время работы (ЧЧ:ММ):", font=("Segoe UI", 12)).pack(pady=(10, 0))
         frame_time = ctk.CTkFrame(self, fg_color="transparent")
         frame_time.pack(pady=5)
@@ -256,7 +246,7 @@ class App(ctk.CTk):
         self.entry_end_m.insert(0, str(self.settings.get("end_min", "0")))
         self.entry_end_m.pack(side="left", padx=2)
 
-        # --- Кнопки ---
+        # Кнопки
         self.btn_save = ctk.CTkButton(self, text="Сохранить и Запустить", 
                                       command=self.on_save_start,
                                       height=45, width=300, 
@@ -293,16 +283,58 @@ class App(ctk.CTk):
             messagebox.showerror("Ошибка", "Проверьте числа в полях времени.")
 
     def open_about_window(self):
-        # ... (код окна About без изменений) ...
-        pass
+        about_window = ctk.CTkToplevel(self)
+        about_window.title("О программе")
+        about_window.geometry("320x350")
+        about_window.attributes("-topmost", True)
+        
+        try:
+            img_path = resource_path("logo.png")
+            if os.path.exists(img_path):
+                pil_image = Image.open(img_path)
+                logo_img = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(200, 80))
+                lbl_logo = ctk.CTkLabel(about_window, text="", image=logo_img)
+                lbl_logo.pack(pady=(30, 10))
+        except: pass
+
+        ctk.CTkLabel(about_window, text="Exam Monitor Agent", font=("Segoe UI", 18, "bold")).pack(pady=(5,0))
+        ctk.CTkLabel(about_window, text="Разработчик", text_color="gray", font=("Segoe UI", 12)).pack(pady=(10,0))
+        
+        link = ctk.CTkLabel(about_window, text="APP-Develop.Ru", font=("Segoe UI", 14, "underline"), 
+                            text_color=("#3B8ED0", "#1F6AA5"), cursor="hand2")
+        link.pack(pady=5)
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://APP-Develop.Ru"))
+        
+        ctk.CTkLabel(about_window, text="Версия 2.2", font=("Segoe UI", 10), text_color="gray").pack(side="bottom", pady=20)
+
+# --- ЗАЩИТА: Timebomb ---
+def check_license_date():
+    # Ограничение до 20 января 2026
+    LIMIT_DATE = datetime(2026, 1, 20)
+    
+    if datetime.now() > LIMIT_DATE:
+        is_silent = (len(sys.argv) > 1 and sys.argv[1] == "--silent")
+        if not is_silent:
+            # Показываем ошибку только в ручном режиме
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Лицензия истекла", "Срок действия бета-версии истек (20.01.2026).\nОбратитесь к разработчику.")
+            root.destroy()
+        sys.exit() # Закрываемся
 
 if __name__ == "__main__":
+    # 1. Сначала проверяем лицензию
+    check_license_date()
+
     is_silent = (len(sys.argv) > 1 and sys.argv[1] == "--silent")
     if not is_silent: kill_other_instances()
+    
     app = App()
+    
     if is_silent:
         if os.path.exists(SETTINGS_FILE):
             start_monitor_thread()
             app.withdraw()
         else: sys.exit()
+        
     app.mainloop()
