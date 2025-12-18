@@ -40,6 +40,7 @@ Source: "dist\agent.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\Удалить {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Registry]
 ; КЛЮЧЕВОЙ МОМЕНТ: Добавляем флаг --silent для скрытого автозапуска
