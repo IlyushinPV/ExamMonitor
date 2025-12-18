@@ -1,3 +1,8 @@
+# DISCLAIMER:
+# This software is designed for educational and administrative purposes only (Exam Monitoring).
+# Usage for surveillance without user consent is strictly prohibited and may violate privacy laws.
+# The developer assumes no liability for misuse.
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
@@ -36,7 +41,7 @@ ctk.set_default_color_theme("blue")
 
 RUNNING = False
 
-# ================= ЛОГИКА ПУТЕЙ =================
+# ================= ПУТИ И ЛОГИ =================
 
 def get_app_data_dir():
     app_data = os.getenv('APPDATA')
@@ -60,8 +65,8 @@ def log_message(message):
 
 def load_settings():
     default_settings = {
-        "mode": "HTTP",
-        "url_host": "",
+        "mode": "SMB", # По умолчанию SMB
+        "url_host": "192.168.1.5/Public",
         "ftp_user": "",
         "ftp_pass": "",
         "interval": 10,
@@ -90,7 +95,7 @@ def save_settings(data):
         log_message(f"Err save settings: {e}")
         messagebox.showerror("Ошибка", str(e))
 
-# ================= АГЕНТ =================
+# ================= ЯДРО =================
 
 def take_screenshot_and_send(settings):
     pc_name = socket.gethostname()
@@ -102,28 +107,20 @@ def take_screenshot_and_send(settings):
             sct_img = sct.grab(sct.monitors[1])
             img_bytes = mss.tools.to_png(sct_img.rgb, sct_img.size)
 
-            if settings["mode"] == "HTTP":
-                files = {'file': (filename, img_bytes)}
-                requests.post(settings["url_host"], files=files, timeout=10)
-
-            elif settings["mode"] == "FTP":
-                bio = io.BytesIO(img_bytes)
-                with ftplib.FTP(settings["url_host"]) as ftp:
-                    ftp.login(user=settings["ftp_user"], passwd=settings["ftp_pass"])
-                    ftp.set_pasv(True)
-                    ftp.storbinary(f"STOR {filename}", bio)
-
-            elif settings["mode"] == "SMB":
+            # --- SMB ---
+            if settings["mode"] == "SMB":
+                # Формат: IP/ShareName
                 raw_url = settings["url_host"].replace("\\", "/")
                 parts = raw_url.split("/", 1)
                 server_ip = parts[0]
                 share_name = parts[1] if len(parts) > 1 else "public" 
                 
+                # Формат: DOMAIN\User
                 user_full = settings["ftp_user"]
                 if "\\" in user_full:
                     domain, username = user_full.split("\\", 1)
                 else:
-                    domain = pc_name
+                    domain = pc_name 
                     username = user_full
 
                 password = settings["ftp_pass"]
@@ -137,6 +134,19 @@ def take_screenshot_and_send(settings):
                     conn.close()
                 else:
                     log_message("SMB Connect failed")
+
+            # --- FTP ---
+            elif settings["mode"] == "FTP":
+                bio = io.BytesIO(img_bytes)
+                with ftplib.FTP(settings["url_host"]) as ftp:
+                    ftp.login(user=settings["ftp_user"], passwd=settings["ftp_pass"])
+                    ftp.set_pasv(True)
+                    ftp.storbinary(f"STOR {filename}", bio)
+
+            # --- HTTP ---
+            elif settings["mode"] == "HTTP":
+                files = {'file': (filename, img_bytes)}
+                requests.post(settings["url_host"], files=files, timeout=10)
 
     except Exception as e:
         log_message(f"Ошибка отправки ({settings['mode']}): {e}")
@@ -174,7 +184,8 @@ def kill_other_instances():
     for proc in psutil.process_iter(['pid', 'name']):
         try:
             proc_name = proc.info['name'].lower()
-            if (proc_name == "agent.exe" or proc_name == "exammonitor_agent.exe") and proc.info['pid'] != current_pid:
+            # ТЕПЕРЬ ИЩЕМ ExamMonAgent.exe
+            if (proc_name == "exammonagent.exe") and proc.info['pid'] != current_pid:
                 proc.kill()
         except:
             pass
@@ -184,13 +195,26 @@ def kill_other_instances():
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        
+        # Disclaimer
+        if not os.path.exists(SETTINGS_FILE):
+            root = tk.Tk()
+            root.withdraw()
+            msg = ("ВНИМАНИЕ!\n\n"
+                   "Эта программа предназначена для администрирования учебного процесса.\n"
+                   "Использование программы для скрытого наблюдения без ведома пользователей "
+                   "может нарушать законодательство.\n\n"
+                   "Нажимая 'Да', вы подтверждаете легальность использования ПО.")
+            answer = messagebox.askyesno("Легальное использование", msg, icon='warning')
+            root.destroy()
+            if not answer: sys.exit()
+
         self.title("Exam Monitor Agent")
         self.geometry("450x650")
 
         try:
             self.iconbitmap(resource_path("icon.ico"))
-        except:
-            pass
+        except: pass
 
         self.settings = load_settings()
 
@@ -199,8 +223,9 @@ class App(ctk.CTk):
 
         # Поля
         ctk.CTkLabel(self, text="Режим отправки:", font=("Segoe UI", 12)).pack(pady=(2, 0))
-        self.mode_var = ctk.StringVar(value=self.settings.get("mode", "HTTP"))
-        self.combo_mode = ctk.CTkComboBox(self, values=["HTTP", "FTP", "SMB"], variable=self.mode_var, width=300)
+        self.mode_var = ctk.StringVar(value=self.settings.get("mode", "SMB"))
+        # НОВЫЙ ПОРЯДОК: SMB, FTP, HTTP
+        self.combo_mode = ctk.CTkComboBox(self, values=["SMB", "FTP", "HTTP"], variable=self.mode_var, width=300)
         self.combo_mode.pack(pady=2)
 
         ctk.CTkLabel(self, text="URL / IP (Для SMB: IP/Папка):", font=("Segoe UI", 12)).pack(pady=(2, 0))
@@ -287,7 +312,6 @@ class App(ctk.CTk):
         about_window.title("О программе")
         about_window.geometry("320x350")
         about_window.attributes("-topmost", True)
-        
         try:
             img_path = resource_path("logo.png")
             if os.path.exists(img_path):
@@ -296,34 +320,27 @@ class App(ctk.CTk):
                 lbl_logo = ctk.CTkLabel(about_window, text="", image=logo_img)
                 lbl_logo.pack(pady=(30, 10))
         except: pass
-
         ctk.CTkLabel(about_window, text="Exam Monitor Agent", font=("Segoe UI", 18, "bold")).pack(pady=(5,0))
         ctk.CTkLabel(about_window, text="Разработчик", text_color="gray", font=("Segoe UI", 12)).pack(pady=(10,0))
-        
         link = ctk.CTkLabel(about_window, text="APP-Develop.Ru", font=("Segoe UI", 14, "underline"), 
                             text_color=("#3B8ED0", "#1F6AA5"), cursor="hand2")
         link.pack(pady=5)
-        link.bind("<Button-1>", lambda e: webbrowser.open("https://APP-Develop.Ru"))
-        
+        link.bind("<Button-1>", lambda e: webbrowser.open("https://app-develop.ru"))
         ctk.CTkLabel(about_window, text="Версия 2.2", font=("Segoe UI", 10), text_color="gray").pack(side="bottom", pady=20)
 
 # --- ЗАЩИТА: Timebomb ---
 def check_license_date():
-    # Ограничение до 20 января 2026
     LIMIT_DATE = datetime(2026, 1, 20)
-    
     if datetime.now() > LIMIT_DATE:
         is_silent = (len(sys.argv) > 1 and sys.argv[1] == "--silent")
         if not is_silent:
-            # Показываем ошибку только в ручном режиме
             root = tk.Tk()
             root.withdraw()
-            messagebox.showerror("Лицензия истекла", "Срок действия бета-версии истек (20.01.2026).\nОбратитесь к разработчику.")
+            messagebox.showerror("Лицензия истекла", "Срок действия бета-версии истек (20.01.2026).")
             root.destroy()
-        sys.exit() # Закрываемся
+        sys.exit()
 
 if __name__ == "__main__":
-    # 1. Сначала проверяем лицензию
     check_license_date()
 
     is_silent = (len(sys.argv) > 1 and sys.argv[1] == "--silent")
@@ -336,5 +353,4 @@ if __name__ == "__main__":
             start_monitor_thread()
             app.withdraw()
         else: sys.exit()
-        
     app.mainloop()
